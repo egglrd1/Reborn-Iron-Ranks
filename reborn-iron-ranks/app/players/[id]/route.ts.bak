@@ -1,0 +1,47 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+function supabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const service = process.env.SUPABASE_SERVICE_ROLE_KEY; // optional
+  return createClient(url, service || anon);
+}
+
+// GET /api/players/:id  -> fetch one player row
+export async function GET(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const sb = supabase();
+
+  const { data, error } = await sb
+    .from("player_profiles")
+    .select("id, rsn, join_date, scaling, discord_id, created_at")
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 404 });
+  }
+
+  return NextResponse.json(data);
+}
+
+// DELETE /api/players/:id -> delete one player row
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const sb = supabase();
+
+  const { error } = await sb.from("player_profiles").delete().eq("id", id);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
