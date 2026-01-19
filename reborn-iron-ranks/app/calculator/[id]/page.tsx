@@ -13,6 +13,9 @@ import IconImg from "@/app/components/IconImg";
 // ✅ NEW
 import SubmitForReviewButton from "./SubmitForReviewButton";
 
+// ✅ NEW: build absolute base URL safely on Vercel/Next 16
+import { headers } from "next/headers";
+
 /* =========================
    Types & Fetchers
 ========================= */
@@ -22,8 +25,15 @@ type PlayerRow = {
   rsn: string;
 };
 
+async function getBaseUrl() {
+  const h = await headers();
+  const proto = h.get("x-forwarded-proto") ?? "https";
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  return host ? `${proto}://${host}` : "";
+}
+
 async function getPlayer(id: string): Promise<PlayerRow | null> {
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
+  const base = await getBaseUrl();
   const res = await fetch(`${base}/api/players/${encodeURIComponent(id)}`, {
     cache: "no-store",
   });
@@ -33,21 +43,19 @@ async function getPlayer(id: string): Promise<PlayerRow | null> {
 }
 
 async function getWom(rsn: string) {
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-  const res = await fetch(
-    `${base}/api/wom/player?rsn=${encodeURIComponent(rsn)}`,
-    { cache: "no-store" }
-  );
+  const base = await getBaseUrl();
+  const res = await fetch(`${base}/api/wom/player?rsn=${encodeURIComponent(rsn)}`, {
+    cache: "no-store",
+  });
   if (!res.ok) return null;
   return res.json();
 }
 
 async function getTempleCollectionLog(rsn: string) {
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-  const res = await fetch(
-    `${base}/api/temple/collection-log?rsn=${encodeURIComponent(rsn)}`,
-    { cache: "no-store" }
-  );
+  const base = await getBaseUrl();
+  const res = await fetch(`${base}/api/temple/collection-log?rsn=${encodeURIComponent(rsn)}`, {
+    cache: "no-store",
+  });
   if (!res.ok) return null;
   return res.json();
 }
@@ -257,16 +265,14 @@ export default async function CalculatorPage({
 
     if (RAID_KEYS.has(key)) {
       raidsTotal += kc;
-      if (kc > highestRaid.kc)
-        highestRaid = { key, name: prettyBossName(key), kc };
+      if (kc > highestRaid.kc) highestRaid = { key, name: prettyBossName(key), kc };
       continue;
     }
 
     if (ZAM_BOSS_EXCLUDE_KEYS.has(key)) continue;
 
     bossKillsTotal += kc;
-    if (kc > highestBoss.kc)
-      highestBoss = { key, name: prettyBossName(key), kc };
+    if (kc > highestBoss.kc) highestBoss = { key, name: prettyBossName(key), kc };
   }
 
   const gotrActivityKc = (() => {
@@ -285,8 +291,7 @@ export default async function CalculatorPage({
     temple?.total_collections ??
     null;
   const available = temple?.total_collections_available ?? null;
-  const collectionLog =
-    collected != null && available != null ? `${collected}/${available}` : "—";
+  const collectionLog = collected != null && available != null ? `${collected}/${available}` : "—";
 
   const raidsProgress = clamp01(raidsTotal / ZAM_TARGET_RAIDS);
   const bossProgress = clamp01(bossKillsTotal / ZAM_TARGET_BOSS_KC);
@@ -294,9 +299,7 @@ export default async function CalculatorPage({
   const excludedLabel = `Excluding: Raids, Wintertodt, Zalcano, GOTR, Hespori`;
 
   // ✅ modal route for this calculator id
-  const rankStructureHref = `/calculator/${encodeURIComponent(
-    player.id
-  )}/rank-structure`;
+  const rankStructureHref = `/calculator/${encodeURIComponent(player.id)}/rank-structure`;
 
   return (
     <main style={S.page}>
@@ -315,49 +318,21 @@ export default async function CalculatorPage({
             border: "1px solid rgba(255,255,255,0.12)",
           }}
         >
-          <IconImg
-            src="/clan/icon.png"
-            alt="Reborn Irons"
-            size={32}
-            style={{ borderRadius: 10 }}
-          />
+          <IconImg src="/clan/icon.png" alt="Reborn Irons" size={32} style={{ borderRadius: 10 }} />
           <div style={{ lineHeight: 1.05 }}>
-            <div style={{ fontWeight: 900, letterSpacing: 0.4 }}>
-              REBORN IRONS
-            </div>
-            <div
-              style={{
-                fontSize: 12,
-                opacity: 0.8,
-                fontWeight: 800,
-              }}
-            >
-              Rank Calculator
-            </div>
+            <div style={{ fontWeight: 900, letterSpacing: 0.4 }}>REBORN IRONS</div>
+            <div style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>Rank Calculator</div>
           </div>
         </div>
 
         {/* ✅ right side actions */}
         <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
-          <SubmitForReviewButton
-  playerId={player.id}
-  rsn={rsn}
-  requestedRank={"Manual review"}
-  requestedRole={"Manual review"}
-/>
-
+          <SubmitForReviewButton playerId={player.id} rsn={rsn} requestedRank={"Manual review"} requestedRole={"Manual review"} />
           <RefreshWomButton rsn={rsn} />
         </div>
       </div>
 
-      <SyncWarnings
-        rsn={rsn}
-        templeOk={!!temple}
-        templeStale={false}
-        wikiOk={false}
-        wikiStale={true}
-        staleDays={7}
-      />
+      <SyncWarnings rsn={rsn} templeOk={!!temple} templeStale={false} wikiOk={false} wikiStale={true} staleDays={7} />
 
       <h1 style={S.h1}>{rsn || "—"}</h1>
 
@@ -373,9 +348,7 @@ export default async function CalculatorPage({
               <div style={{ display: "grid", gap: 6 }}>
                 <Row label="Total level" value={fmtInt(totalLevel)} />
                 <Row label="Overall XP" value={fmtInt(overallXp)} />
-                <SkillingRankPanel
-                  totalLevel={typeof totalLevel === "number" ? totalLevel : null}
-                />
+                <SkillingRankPanel totalLevel={typeof totalLevel === "number" ? totalLevel : null} />
                 <Divider tight />
 
                 <Row label="EHP" value={fmt1(wom?.ehp)} />
@@ -394,9 +367,7 @@ export default async function CalculatorPage({
             ) : (
               <div style={{ display: "grid", gap: 8 }}>
                 <div style={{ display: "grid", gap: 6 }}>
-                  <div style={{ fontWeight: 900, fontSize: 12, opacity: 0.9 }}>
-                    Zamorakian Progress
-                  </div>
+                  <div style={{ fontWeight: 900, fontSize: 12, opacity: 0.9 }}>Zamorakian Progress</div>
 
                   <Row
                     label="Raids KC"
@@ -413,10 +384,7 @@ export default async function CalculatorPage({
                   <div style={{ fontSize: 11, opacity: 0.72, lineHeight: 1.2 }}>
                     {excludedLabel}
                     {gotrActivityKc > 0 ? (
-                      <span style={{ opacity: 0.85 }}>
-                        {" "}
-                        (GOTR activity seen: {gotrActivityKc.toLocaleString()})
-                      </span>
+                      <span style={{ opacity: 0.85 }}> (GOTR activity seen: {gotrActivityKc.toLocaleString()})</span>
                     ) : null}
                   </div>
 
@@ -427,24 +395,17 @@ export default async function CalculatorPage({
                 <Row
                   label="Highest raid"
                   value={
-                    highestRaid.kc > 0
-                      ? `${highestRaid.name} (${highestRaid.kc.toLocaleString()})`
-                      : "—"
+                    highestRaid.kc > 0 ? `${highestRaid.name} (${highestRaid.kc.toLocaleString()})` : "—"
                   }
                 />
 
                 <Divider tight />
 
-                <Row
-                  label="Total boss kills"
-                  value={bossKillsTotal.toLocaleString()}
-                />
+                <Row label="Total boss kills" value={bossKillsTotal.toLocaleString()} />
                 <Row
                   label="Highest boss"
                   value={
-                    highestBoss.kc > 0
-                      ? `${highestBoss.name} (${highestBoss.kc.toLocaleString()})`
-                      : "—"
+                    highestBoss.kc > 0 ? `${highestBoss.name} (${highestBoss.kc.toLocaleString()})` : "—"
                   }
                 />
               </div>
@@ -471,9 +432,7 @@ export default async function CalculatorPage({
 
       <details style={{ marginTop: 14, opacity: 0.9 }}>
         <summary style={{ cursor: "pointer" }}>Debug: WOM + Temple JSON</summary>
-        <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>
-          {JSON.stringify({ wom, templeResp }, null, 2)}
-        </pre>
+        <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{JSON.stringify({ wom, templeResp }, null, 2)}</pre>
       </details>
     </main>
   );
@@ -493,9 +452,7 @@ function Card({ title, children }: { title: React.ReactNode; children: any }) {
         padding: 12,
       }}
     >
-      <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 14 }}>
-        {title}
-      </div>
+      <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 14 }}>{title}</div>
       {children}
     </section>
   );
