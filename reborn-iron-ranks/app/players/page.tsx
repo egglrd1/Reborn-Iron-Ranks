@@ -4,6 +4,7 @@
 // - Delete: client button calls DELETE /api/players/:id
 
 import Link from "next/link";
+import { headers } from "next/headers";
 import DeletePlayerButton from "./DeletePlayerButton";
 import IconImg from "@/app/components/IconImg";
 import BackButton from "@/components/BackButton";
@@ -18,9 +19,22 @@ type Player = {
   scaling: number | null;
 };
 
+async function getBaseUrlFromHeaders() {
+  const h = await headers();
+
+  // Prefer forwarded headers (Vercel), fall back to host
+  const host = h.get("x-forwarded-host") || h.get("host") || "";
+  const proto = h.get("x-forwarded-proto") || "https";
+
+  if (!host) return "";
+  return `${proto}://${host}`;
+}
+
 async function getPlayers(): Promise<Player[]> {
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000";
-  const res = await fetch(`${base}/api/players`, { cache: "no-store" });
+  const base = await getBaseUrlFromHeaders();
+  const url = base ? `${base}/api/players` : "/api/players";
+
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) return [];
   const json = await res.json();
   return json?.players ?? [];
