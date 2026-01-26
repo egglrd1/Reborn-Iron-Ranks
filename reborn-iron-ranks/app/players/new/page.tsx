@@ -25,9 +25,12 @@ export default function NewPlayerPage() {
 
   const [rsn, setRsn] = useState("");
 
-  // ✅ NEW: searchable picker state
+  // ✅ searchable picker state
   const [query, setQuery] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  // ✅ NEW: stable hover state (no DOM style mutation)
+  const [hoverId, setHoverId] = useState<number | null>(null);
 
   // temp until we wire Discord login
   const [discordId, setDiscordId] = useState("208786500249321472");
@@ -240,7 +243,7 @@ export default function NewPlayerPage() {
 
           <div style={{ padding: 14 }}>
             <div style={{ display: "grid", gap: 12, maxWidth: 520 }}>
-              {/* ✅ REPLACED: janky select -> searchable picker */}
+              {/* ✅ Searchable picker */}
               <div ref={wrapRef} style={{ display: "grid", gap: 6, position: "relative" }}>
                 <span>Player name</span>
 
@@ -249,7 +252,6 @@ export default function NewPlayerPage() {
                   onChange={(e) => {
                     setQuery(e.target.value);
                     setPickerOpen(true);
-                    // if they start typing after selecting, clear the rsn until they pick again
                     if (rsn) setRsn("");
                   }}
                   onFocus={() => setPickerOpen(true)}
@@ -257,7 +259,6 @@ export default function NewPlayerPage() {
                   style={fieldStyles}
                 />
 
-                {/* Selected indicator */}
                 {rsn ? (
                   <div style={{ fontSize: 12, opacity: 0.7 }}>
                     Selected: <b>{rsn}</b>
@@ -274,8 +275,8 @@ export default function NewPlayerPage() {
                       borderRadius: 12,
                       border: `1px solid ${UI.borderSoft}`,
 
-                      // ✅ FIX: make the dropdown background opaque so it isn't "clear"
-                      background: UI.panel,
+                      // ✅ FIX: force opaque dropdown (no “clear” list)
+                      background: UI.panelStrong,
 
                       boxShadow: "0 18px 60px rgba(0,0,0,0.55)",
                       overflow: "hidden",
@@ -291,7 +292,7 @@ export default function NewPlayerPage() {
                         alignItems: "center",
                         gap: 12,
 
-                        // ✅ FIX: keep header readable too
+                        // ✅ FIX: readable header
                         background: UI.panelStrong,
                       }}
                     >
@@ -308,7 +309,7 @@ export default function NewPlayerPage() {
                         onClick={() => setPickerOpen(false)}
                         style={{
                           border: `1px solid ${UI.borderSoft}`,
-                          background: UI.panel,
+                          background: UI.panelStrong,
                           color: UI.text,
                           borderRadius: 10,
                           padding: "6px 8px",
@@ -326,7 +327,9 @@ export default function NewPlayerPage() {
                       style={{
                         maxHeight: 320,
                         overflowY: "auto",
-                        background: UI.panel, // ✅ ensure list area is opaque
+
+                        // ✅ FIX: readable list area (opaque)
+                        background: UI.panelStrong,
                       }}
                     >
                       {!loadingRoster && filtered.length === 0 ? (
@@ -335,38 +338,39 @@ export default function NewPlayerPage() {
                         </div>
                       ) : null}
 
-                      {filtered.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => {
-                            setRsn(p.value);
-                            setQuery(p.value);
-                            setPickerOpen(false);
-                          }}
-                          // ✅ FIX: make each row readable (not transparent) + add simple hover
-                          onMouseEnter={(e) => {
-                            (e.currentTarget as HTMLButtonElement).style.background = UI.panelStrong;
-                          }}
-                          onMouseLeave={(e) => {
-                            (e.currentTarget as HTMLButtonElement).style.background = UI.panel;
-                          }}
-                          style={{
-                            width: "100%",
-                            textAlign: "left",
-                            padding: "10px 10px",
-                            background: UI.panel,
-                            border: "none",
-                            borderBottom: `1px solid ${UI.borderSoft}`,
-                            color: UI.text,
-                            cursor: "pointer",
-                            fontWeight: 900,
-                            fontSize: 13,
-                          }}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
+                      {filtered.map((p) => {
+                        const isHover = hoverId === p.id;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onMouseEnter={() => setHoverId(p.id)}
+                            onMouseLeave={() => setHoverId(null)}
+                            onClick={() => {
+                              setRsn(p.value);
+                              setQuery(p.value);
+                              setPickerOpen(false);
+                            }}
+                            style={{
+                              width: "100%",
+                              textAlign: "left",
+                              padding: "10px 10px",
+
+                              // ✅ FIX: row is solid; hover uses your existing palette
+                              background: isHover ? UI.panel : UI.panelStrong,
+
+                              border: "none",
+                              borderBottom: `1px solid ${UI.borderSoft}`,
+                              color: UI.text,
+                              cursor: "pointer",
+                              fontWeight: 900,
+                              fontSize: 13,
+                            }}
+                          >
+                            {p.label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 ) : null}

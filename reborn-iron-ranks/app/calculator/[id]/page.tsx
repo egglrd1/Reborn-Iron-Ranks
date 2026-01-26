@@ -26,10 +26,17 @@ type PlayerRow = {
 };
 
 async function getBaseUrl() {
+  // Next 16: headers() can be typed as async
   const h = await headers();
+
+  // Prefer forwarded host/proto in Vercel
   const proto = h.get("x-forwarded-proto") ?? "https";
   const host = h.get("x-forwarded-host") ?? h.get("host");
-  return host ? `${proto}://${host}` : "";
+
+  if (host) return `${proto}://${host}`;
+
+  // Final fallback (should rarely happen)
+  return process.env.NEXTAUTH_URL ?? "";
 }
 
 async function getPlayer(id: string): Promise<PlayerRow | null> {
@@ -44,18 +51,20 @@ async function getPlayer(id: string): Promise<PlayerRow | null> {
 
 async function getWom(rsn: string) {
   const base = await getBaseUrl();
-  const res = await fetch(`${base}/api/wom/player?rsn=${encodeURIComponent(rsn)}`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    `${base}/api/wom/player?rsn=${encodeURIComponent(rsn)}`,
+    { cache: "no-store" }
+  );
   if (!res.ok) return null;
   return res.json();
 }
 
 async function getTempleCollectionLog(rsn: string) {
   const base = await getBaseUrl();
-  const res = await fetch(`${base}/api/temple/collection-log?rsn=${encodeURIComponent(rsn)}`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    `${base}/api/temple/collection-log?rsn=${encodeURIComponent(rsn)}`,
+    { cache: "no-store" }
+  );
   if (!res.ok) return null;
   return res.json();
 }
@@ -217,8 +226,8 @@ export default async function CalculatorPage({
 
   const templeResp = rsn ? await getTempleCollectionLog(rsn) : null;
 
-  // ✅ Temple responses can vary by shape; keep old behavior but add safe fallbacks
-  const temple = templeResp?.temple ?? templeResp?.data ?? templeResp ?? null;
+  // ✅ preserve old behavior, but be resilient
+  const temple = templeResp?.temple ?? templeResp?.data ?? null;
 
   // Skills
   const overall = pickMetric(wom, "skills", "overall");
@@ -267,14 +276,16 @@ export default async function CalculatorPage({
 
     if (RAID_KEYS.has(key)) {
       raidsTotal += kc;
-      if (kc > highestRaid.kc) highestRaid = { key, name: prettyBossName(key), kc };
+      if (kc > highestRaid.kc)
+        highestRaid = { key, name: prettyBossName(key), kc };
       continue;
     }
 
     if (ZAM_BOSS_EXCLUDE_KEYS.has(key)) continue;
 
     bossKillsTotal += kc;
-    if (kc > highestBoss.kc) highestBoss = { key, name: prettyBossName(key), kc };
+    if (kc > highestBoss.kc)
+      highestBoss = { key, name: prettyBossName(key), kc };
   }
 
   const gotrActivityKc = (() => {
@@ -286,41 +297,34 @@ export default async function CalculatorPage({
     return 0;
   })();
 
-  // ✅ Temple summary (more robust)
-  const templeEhc =
-    temple?.ehc ??
-    templeResp?.ehc ??
-    templeResp?.data?.ehc ??
-    templeResp?.temple?.ehc ??
-    null;
+  // ✅ FIX: EHC + Collection log robust extraction
+  // Your /api/temple/collection-log returns: { ok, temple: <payload>, pets, petsRow }
+  // The fields we want are under templeResp.temple.data in Temple's payload.
+  const t = templeResp?.temple ?? null;
+  const tData = t?.data ?? null;
+  const tTotals = tData?.totals ?? null;
 
-  const templeTotals =
-    temple?.totals ??
-    temple?.collection_log ??
-    temple?.collectionLog ??
-    templeResp?.totals ??
-    templeResp?.data?.totals ??
+  const templeEhc =
+    tData?.ehc ??
+    temple?.ehc ?? // fallback if your own code ever flattens it
     null;
 
   const collected =
-    temple?.total_collections_in_response ??
-    temple?.total_collections_found ??
-    temple?.total_collections ??
-    templeTotals?.total_collections_in_response ??
-    templeTotals?.total_collections_found ??
-    templeTotals?.total_collections ??
-    templeResp?.total_collections_in_response ??
-    templeResp?.total_collections_found ??
-    templeResp?.total_collections ??
+    tTotals?.total_collections_in_response ??
+    tTotals?.total_collections_found ??
+    tTotals?.total_collections ??
+    tData?.total_collections_in_response ??
+    tData?.total_collections_found ??
+    tData?.total_collections ??
     null;
 
   const available =
-    temple?.total_collections_available ??
-    templeTotals?.total_collections_available ??
-    templeResp?.total_collections_available ??
+    tTotals?.total_collections_available ??
+    tData?.total_collections_available ??
     null;
 
-  const collectionLog = collected != null && available != null ? `${collected}/${available}` : "—";
+  const collectionLog =
+    collected != null && available != null ? `${collected}/${available}` : "—";
 
   const raidsProgress = clamp01(raidsTotal / ZAM_TARGET_RAIDS);
   const bossProgress = clamp01(bossKillsTotal / ZAM_TARGET_BOSS_KC);
@@ -328,7 +332,9 @@ export default async function CalculatorPage({
   const excludedLabel = `Excluding: Raids, Wintertodt, Zalcano, GOTR, Hespori`;
 
   // ✅ modal route for this calculator id
-  const rankStructureHref = `/calculator/${encodeURIComponent(player.id)}/rank-structure`;
+  const rankStructureHref = `/calculator/${encodeURIComponent(
+    player.id
+  )}/rank-structure`;
 
   return (
     <main style={S.page}>
@@ -347,10 +353,25 @@ export default async function CalculatorPage({
             border: "1px solid rgba(255,255,255,0.12)",
           }}
         >
-          <IconImg src="/clan/icon.png" alt="Reborn Irons" size={32} style={{ borderRadius: 10 }} />
+          <IconImg
+            src="/clan/icon.png"
+            alt="Reborn Irons"
+            size={32}
+            style={{ borderRadius: 10 }}
+          />
           <div style={{ lineHeight: 1.05 }}>
-            <div style={{ fontWeight: 900, letterSpacing: 0.4 }}>REBORN IRONS</div>
-            <div style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>Rank Calculator</div>
+            <div style={{ fontWeight: 900, letterSpacing: 0.4 }}>
+              REBORN IRONS
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                opacity: 0.8,
+                fontWeight: 800,
+              }}
+            >
+              Rank Calculator
+            </div>
           </div>
         </div>
 
@@ -362,11 +383,19 @@ export default async function CalculatorPage({
             requestedRank={"Manual review"}
             requestedRole={"Manual review"}
           />
+
           <RefreshWomButton rsn={rsn} />
         </div>
       </div>
 
-      <SyncWarnings rsn={rsn} templeOk={!!temple} templeStale={false} wikiOk={false} wikiStale={true} staleDays={7} />
+      <SyncWarnings
+        rsn={rsn}
+        templeOk={!!temple}
+        templeStale={false}
+        wikiOk={false}
+        wikiStale={true}
+        staleDays={7}
+      />
 
       <h1 style={S.h1}>{rsn || "—"}</h1>
 
@@ -382,7 +411,9 @@ export default async function CalculatorPage({
               <div style={{ display: "grid", gap: 6 }}>
                 <Row label="Total level" value={fmtInt(totalLevel)} />
                 <Row label="Overall XP" value={fmtInt(overallXp)} />
-                <SkillingRankPanel totalLevel={typeof totalLevel === "number" ? totalLevel : null} />
+                <SkillingRankPanel
+                  totalLevel={typeof totalLevel === "number" ? totalLevel : null}
+                />
                 <Divider tight />
 
                 <Row label="EHP" value={fmt1(wom?.ehp)} />
@@ -401,9 +432,14 @@ export default async function CalculatorPage({
             ) : (
               <div style={{ display: "grid", gap: 8 }}>
                 <div style={{ display: "grid", gap: 6 }}>
-                  <div style={{ fontWeight: 900, fontSize: 12, opacity: 0.9 }}>Zamorakian Progress</div>
+                  <div style={{ fontWeight: 900, fontSize: 12, opacity: 0.9 }}>
+                    Zamorakian Progress
+                  </div>
 
-                  <Row label="Raids KC" value={`${raidsTotal.toLocaleString()} / ${ZAM_TARGET_RAIDS.toLocaleString()}`} />
+                  <Row
+                    label="Raids KC"
+                    value={`${raidsTotal.toLocaleString()} / ${ZAM_TARGET_RAIDS.toLocaleString()}`}
+                  />
                   <ProgressBar value={raidsProgress} />
 
                   <Row
@@ -415,7 +451,10 @@ export default async function CalculatorPage({
                   <div style={{ fontSize: 11, opacity: 0.72, lineHeight: 1.2 }}>
                     {excludedLabel}
                     {gotrActivityKc > 0 ? (
-                      <span style={{ opacity: 0.85 }}> (GOTR activity seen: {gotrActivityKc.toLocaleString()})</span>
+                      <span style={{ opacity: 0.85 }}>
+                        {" "}
+                        (GOTR activity seen: {gotrActivityKc.toLocaleString()})
+                      </span>
                     ) : null}
                   </div>
 
@@ -425,15 +464,26 @@ export default async function CalculatorPage({
                 <Row label="Total raids" value={raidsTotal.toLocaleString()} />
                 <Row
                   label="Highest raid"
-                  value={highestRaid.kc > 0 ? `${highestRaid.name} (${highestRaid.kc.toLocaleString()})` : "—"}
+                  value={
+                    highestRaid.kc > 0
+                      ? `${highestRaid.name} (${highestRaid.kc.toLocaleString()})`
+                      : "—"
+                  }
                 />
 
                 <Divider tight />
 
-                <Row label="Total boss kills" value={bossKillsTotal.toLocaleString()} />
+                <Row
+                  label="Total boss kills"
+                  value={bossKillsTotal.toLocaleString()}
+                />
                 <Row
                   label="Highest boss"
-                  value={highestBoss.kc > 0 ? `${highestBoss.name} (${highestBoss.kc.toLocaleString()})` : "—"}
+                  value={
+                    highestBoss.kc > 0
+                      ? `${highestBoss.name} (${highestBoss.kc.toLocaleString()})`
+                      : "—"
+                  }
                 />
               </div>
             )}
@@ -459,7 +509,9 @@ export default async function CalculatorPage({
 
       <details style={{ marginTop: 14, opacity: 0.9 }}>
         <summary style={{ cursor: "pointer" }}>Debug: WOM + Temple JSON</summary>
-        <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{JSON.stringify({ wom, templeResp }, null, 2)}</pre>
+        <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>
+          {JSON.stringify({ wom, templeResp }, null, 2)}
+        </pre>
       </details>
     </main>
   );
@@ -479,7 +531,9 @@ function Card({ title, children }: { title: React.ReactNode; children: any }) {
         padding: 12,
       }}
     >
-      <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 14 }}>{title}</div>
+      <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 14 }}>
+        {title}
+      </div>
       {children}
     </section>
   );

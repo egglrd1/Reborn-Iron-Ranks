@@ -2,9 +2,14 @@
 import { NextResponse } from "next/server";
 import nacl from "tweetnacl";
 import { createClient } from "@supabase/supabase-js";
+import { after } from "next/server";
 
-export const runtime = "nodejs"; // IMPORTANT
-export const dynamic = "force-dynamic"; // keep this route dynamic in dev/tunnels
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+// Optional: gives the function more breathing room for the follow-up work.
+// (Does NOT affect Discord’s requirement that we respond quickly.)
+export const maxDuration = 15;
 
 function supabaseAdmin() {
   const url = process.env.SUPABASE_URL;
@@ -35,14 +40,12 @@ function verifyDiscordSignature(opts: {
   const timestamp = (opts.timestamp || "").trim();
   const bodyBytes = opts.bodyBytes;
 
-  // Discord supplies these as hex strings
   const sig = Buffer.from(signature, "hex");
   const pk = Buffer.from(publicKey, "hex");
 
   const enc = new TextEncoder();
   const tsBytes = enc.encode(timestamp);
 
-  // msg = timestamp + raw body bytes
   const msg = new Uint8Array(tsBytes.length + bodyBytes.length);
   msg.set(tsBytes, 0);
   msg.set(bodyBytes, tsBytes.length);
@@ -93,7 +96,7 @@ async function postInteractionFollowupEphemeral(args: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       content,
-      flags: 64, // ephemeral
+      flags: 64,
     }),
   }).catch(() => {});
 }
@@ -129,6 +132,18 @@ async function disableButtonsOnStaffMessage(args: {
   }).catch(() => {});
 }
 
+function disabledInteractionComponents() {
+  return [
+    {
+      type: 1,
+      components: [
+        { type: 2, style: 3, label: "Approve", custom_id: "disabled", disabled: true },
+        { type: 2, style: 4, label: "Deny", custom_id: "disabled2", disabled: true },
+      ],
+    },
+  ];
+}
+
 async function handleDecision(interaction: any) {
   const botToken = process.env.DISCORD_BOT_TOKEN;
   const guildId = process.env.DISCORD_GUILD_ID;
@@ -139,7 +154,7 @@ async function handleDecision(interaction: any) {
   }
 
   const customId: string = interaction?.data?.custom_id ?? "";
-  const parts = customId.split(":"); // review:approve:<requestId> or review:deny:<requestId>
+  const parts = customId.split(":");
   if (parts.length !== 3 || parts[0] !== "review") {
     console.log("[discord/interactions] unknown custom_id:", customId);
     return;
@@ -224,6 +239,7 @@ async function handleDecision(interaction: any) {
       })
       .eq("id", requestId);
 
+    // Best-effort: also disable buttons via PATCH (in case message wasn’t the one Discord updated)
     if (rr.discord_channel_id && rr.discord_message_id) {
       await disableButtonsOnStaffMessage({
         botToken,
@@ -257,7 +273,6 @@ export async function POST(req: Request) {
   const started = Date.now();
 
   try {
-    // ✅ LOG #1: proves the route is being hit at all
     console.log("[discord/interactions] HIT", new Date().toISOString());
 
     const publicKey = (process.env.DISCORD_PUBLIC_KEY || "").trim();
@@ -274,7 +289,6 @@ export async function POST(req: Request) {
       return json({ error: "Missing Discord signature headers" }, 401);
     }
 
-    // ✅ IMPORTANT: use raw bytes for verification
     const bodyBuf = new Uint8Array(await req.arrayBuffer());
 
     const ok = verifyDiscordSignature({
@@ -285,10 +299,8 @@ export async function POST(req: Request) {
     });
 
     console.log("[discord/interactions] signature ok?", ok, "ms:", Date.now() - started);
-
     if (!ok) return json({ error: "Invalid signature" }, 401);
 
-    // Parse AFTER verification (still from the same bytes)
     const rawBody = new TextDecoder().decode(bodyBuf);
     const interaction = JSON.parse(rawBody);
     const type = interaction?.type;
@@ -301,12 +313,17 @@ export async function POST(req: Request) {
 
     // Button clicks
     if (type === 3) {
-      // ✅ ACK IMMEDIATELY so Discord doesn't show "interaction failed"
-      // type 6 = DEFERRED_UPDATE_MESSAGE
-      console.log("[discord/interactions] ACK type=6 (deferred update) in ms:", Date.now() - started);
+      // ✅ Run the work reliably after response (prevents the “only completes on later requests” issue)
+      after(() => handleDecision(interaction));
 
-      void handleDecision(interaction);
-      return json({ type: 6 });
+      // ✅ Instant UI update: disable buttons immediately in Discord without waiting on PATCH/Supabase/role calls
+      console.log("[discord/interactions] UPDATE_MESSAGE type=7 (disable buttons) in ms:", Date.now() - started);
+      return json({
+        type: 7,
+        data: {
+          components: disabledInteractionComponents(),
+        },
+      });
     }
 
     console.log("[discord/interactions] Unsupported type:", type);
