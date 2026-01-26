@@ -216,7 +216,9 @@ export default async function CalculatorPage({
   const wom = rsn ? await getWom(rsn) : null;
 
   const templeResp = rsn ? await getTempleCollectionLog(rsn) : null;
-  const temple = templeResp?.temple ?? templeResp?.data ?? null;
+
+  // ✅ Temple responses can vary by shape; keep old behavior but add safe fallbacks
+  const temple = templeResp?.temple ?? templeResp?.data ?? templeResp ?? null;
 
   // Skills
   const overall = pickMetric(wom, "skills", "overall");
@@ -284,13 +286,40 @@ export default async function CalculatorPage({
     return 0;
   })();
 
-  // Temple summary
+  // ✅ Temple summary (more robust)
+  const templeEhc =
+    temple?.ehc ??
+    templeResp?.ehc ??
+    templeResp?.data?.ehc ??
+    templeResp?.temple?.ehc ??
+    null;
+
+  const templeTotals =
+    temple?.totals ??
+    temple?.collection_log ??
+    temple?.collectionLog ??
+    templeResp?.totals ??
+    templeResp?.data?.totals ??
+    null;
+
   const collected =
     temple?.total_collections_in_response ??
     temple?.total_collections_found ??
     temple?.total_collections ??
+    templeTotals?.total_collections_in_response ??
+    templeTotals?.total_collections_found ??
+    templeTotals?.total_collections ??
+    templeResp?.total_collections_in_response ??
+    templeResp?.total_collections_found ??
+    templeResp?.total_collections ??
     null;
-  const available = temple?.total_collections_available ?? null;
+
+  const available =
+    temple?.total_collections_available ??
+    templeTotals?.total_collections_available ??
+    templeResp?.total_collections_available ??
+    null;
+
   const collectionLog = collected != null && available != null ? `${collected}/${available}` : "—";
 
   const raidsProgress = clamp01(raidsTotal / ZAM_TARGET_RAIDS);
@@ -327,7 +356,12 @@ export default async function CalculatorPage({
 
         {/* ✅ right side actions */}
         <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
-          <SubmitForReviewButton playerId={player.id} rsn={rsn} requestedRank={"Manual review"} requestedRole={"Manual review"} />
+          <SubmitForReviewButton
+            playerId={player.id}
+            rsn={rsn}
+            requestedRank={"Manual review"}
+            requestedRole={"Manual review"}
+          />
           <RefreshWomButton rsn={rsn} />
         </div>
       </div>
@@ -353,7 +387,7 @@ export default async function CalculatorPage({
 
                 <Row label="EHP" value={fmt1(wom?.ehp)} />
                 <Row label="EHB" value={fmt1(wom?.ehb)} />
-                <Row label="EHC" value={fmt1(temple?.ehc)} />
+                <Row label="EHC" value={fmt1(templeEhc)} />
 
                 <Divider tight />
                 <Row label="Collection Log" value={collectionLog} />
@@ -369,10 +403,7 @@ export default async function CalculatorPage({
                 <div style={{ display: "grid", gap: 6 }}>
                   <div style={{ fontWeight: 900, fontSize: 12, opacity: 0.9 }}>Zamorakian Progress</div>
 
-                  <Row
-                    label="Raids KC"
-                    value={`${raidsTotal.toLocaleString()} / ${ZAM_TARGET_RAIDS.toLocaleString()}`}
-                  />
+                  <Row label="Raids KC" value={`${raidsTotal.toLocaleString()} / ${ZAM_TARGET_RAIDS.toLocaleString()}`} />
                   <ProgressBar value={raidsProgress} />
 
                   <Row
@@ -394,9 +425,7 @@ export default async function CalculatorPage({
                 <Row label="Total raids" value={raidsTotal.toLocaleString()} />
                 <Row
                   label="Highest raid"
-                  value={
-                    highestRaid.kc > 0 ? `${highestRaid.name} (${highestRaid.kc.toLocaleString()})` : "—"
-                  }
+                  value={highestRaid.kc > 0 ? `${highestRaid.name} (${highestRaid.kc.toLocaleString()})` : "—"}
                 />
 
                 <Divider tight />
@@ -404,9 +433,7 @@ export default async function CalculatorPage({
                 <Row label="Total boss kills" value={bossKillsTotal.toLocaleString()} />
                 <Row
                   label="Highest boss"
-                  value={
-                    highestBoss.kc > 0 ? `${highestBoss.name} (${highestBoss.kc.toLocaleString()})` : "—"
-                  }
+                  value={highestBoss.kc > 0 ? `${highestBoss.name} (${highestBoss.kc.toLocaleString()})` : "—"}
                 />
               </div>
             )}

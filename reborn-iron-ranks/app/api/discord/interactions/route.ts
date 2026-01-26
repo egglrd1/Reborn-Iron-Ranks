@@ -23,17 +23,29 @@ function json(body: any, status = 200) {
   });
 }
 
+// ✅ robust: verify using exact raw bytes (timestamp bytes + body bytes)
 function verifyDiscordSignature(opts: {
   publicKey: string;
   signature: string;
   timestamp: string;
-  rawBody: string;
+  bodyBytes: Uint8Array;
 }) {
-  const { publicKey, signature, timestamp, rawBody } = opts;
+  const publicKey = (opts.publicKey || "").trim();
+  const signature = (opts.signature || "").trim();
+  const timestamp = (opts.timestamp || "").trim();
+  const bodyBytes = opts.bodyBytes;
 
+  // Discord supplies these as hex strings
   const sig = Buffer.from(signature, "hex");
   const pk = Buffer.from(publicKey, "hex");
-  const msg = Buffer.from(timestamp + rawBody);
+
+  const enc = new TextEncoder();
+  const tsBytes = enc.encode(timestamp);
+
+  // msg = timestamp + raw body bytes
+  const msg = new Uint8Array(tsBytes.length + bodyBytes.length);
+  msg.set(tsBytes, 0);
+  msg.set(bodyBytes, tsBytes.length);
 
   return nacl.sign.detached.verify(msg, sig, pk);
 }
@@ -248,36 +260,36 @@ export async function POST(req: Request) {
     // ✅ LOG #1: proves the route is being hit at all
     console.log("[discord/interactions] HIT", new Date().toISOString());
 
-    const publicKey = process.env.DISCORD_PUBLIC_KEY;
+    const publicKey = (process.env.DISCORD_PUBLIC_KEY || "").trim();
     if (!publicKey) {
       console.log("[discord/interactions] Missing DISCORD_PUBLIC_KEY");
       return json({ error: "Missing DISCORD_PUBLIC_KEY" }, 500);
     }
 
-    const sig = req.headers.get("x-signature-ed25519") || "";
-    const ts = req.headers.get("x-signature-timestamp") || "";
-
-    // Raw body required for signature verification
-    const rawBody = await req.text();
+    const sig = (req.headers.get("x-signature-ed25519") || "").trim();
+    const ts = (req.headers.get("x-signature-timestamp") || "").trim();
 
     if (!sig || !ts) {
-      // Keep as 401 (Discord will never send unsigned, so this helps catch wrong-url tests)
       console.log("[discord/interactions] Missing signature headers");
       return json({ error: "Missing Discord signature headers" }, 401);
     }
+
+    // ✅ IMPORTANT: use raw bytes for verification
+    const bodyBuf = new Uint8Array(await req.arrayBuffer());
 
     const ok = verifyDiscordSignature({
       publicKey,
       signature: sig,
       timestamp: ts,
-      rawBody,
+      bodyBytes: bodyBuf,
     });
 
-    // ✅ LOG #2: signature result
     console.log("[discord/interactions] signature ok?", ok, "ms:", Date.now() - started);
 
     if (!ok) return json({ error: "Invalid signature" }, 401);
 
+    // Parse AFTER verification (still from the same bytes)
+    const rawBody = new TextDecoder().decode(bodyBuf);
     const interaction = JSON.parse(rawBody);
     const type = interaction?.type;
 
@@ -304,7 +316,6 @@ export async function POST(req: Request) {
     });
   } catch (e: any) {
     console.log("[discord/interactions] POST handler crashed:", e?.message ?? e);
-    // Always return valid JSON so Discord gets *some* response
     return json({
       type: 4,
       data: { content: "Server error handling interaction.", flags: 64 },

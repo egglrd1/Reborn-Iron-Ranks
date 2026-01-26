@@ -1,3 +1,5 @@
+// app/players/new/page.tsx
+
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -271,7 +273,10 @@ export default function NewPlayerPage() {
                       right: 0,
                       borderRadius: 12,
                       border: `1px solid ${UI.borderSoft}`,
-                      background: UI.panelStrong,
+
+                      // ✅ FIX: make the dropdown background opaque so it isn't "clear"
+                      background: UI.panel,
+
                       boxShadow: "0 18px 60px rgba(0,0,0,0.55)",
                       overflow: "hidden",
                       zIndex: 50,
@@ -285,6 +290,9 @@ export default function NewPlayerPage() {
                         justifyContent: "space-between",
                         alignItems: "center",
                         gap: 12,
+
+                        // ✅ FIX: keep header readable too
+                        background: UI.panelStrong,
                       }}
                     >
                       <div style={{ fontSize: 12, opacity: 0.75 }}>
@@ -318,6 +326,7 @@ export default function NewPlayerPage() {
                       style={{
                         maxHeight: 320,
                         overflowY: "auto",
+                        background: UI.panel, // ✅ ensure list area is opaque
                       }}
                     >
                       {!loadingRoster && filtered.length === 0 ? (
@@ -335,16 +344,24 @@ export default function NewPlayerPage() {
                             setQuery(p.value);
                             setPickerOpen(false);
                           }}
+                          // ✅ FIX: make each row readable (not transparent) + add simple hover
+                          onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.background = UI.panelStrong;
+                          }}
+                          onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.background = UI.panel;
+                          }}
                           style={{
                             width: "100%",
                             textAlign: "left",
                             padding: "10px 10px",
-                            background: "transparent",
+                            background: UI.panel,
                             border: "none",
                             borderBottom: `1px solid ${UI.borderSoft}`,
                             color: UI.text,
                             cursor: "pointer",
                             fontWeight: 900,
+                            fontSize: 13,
                           }}
                         >
                           {p.label}
@@ -359,11 +376,7 @@ export default function NewPlayerPage() {
 
               <label style={{ display: "grid", gap: 6 }}>
                 <span>Discord ID (temp)</span>
-                <input
-                  value={discordId}
-                  onChange={(e) => setDiscordId(e.target.value)}
-                  style={fieldStyles}
-                />
+                <input value={discordId} onChange={(e) => setDiscordId(e.target.value)} style={fieldStyles} />
               </label>
 
               <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
