@@ -1,0 +1,19 @@
+// app/api/temple/clog-suggest/route.ts
+import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  return NextResponse.json(
+    { ok: false, error: "Not implemented" },
+    { status: 501, headers: { "Cache-Control": "no-store" } }
+  );
+}
+
+export async function POST() {
+  return NextResponse.json(
+    { ok: false, error: "Not implemented" },
+    { status: 501, headers: { "Cache-Control": "no-store" } }
+  );
+}

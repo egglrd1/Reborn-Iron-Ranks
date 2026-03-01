@@ -6,44 +6,24 @@ import SkillsTab from "./SkillsTab";
 import ItemChecklist from "./ItemChecklist";
 import SkillingRankPanel from "./SkillingRankPanel";
 import BackButton from "@/components/BackButton";
-
-// ✅ correct location in your repo
 import IconImg from "@/app/components/IconImg";
-
-// ✅ NEW
 import SubmitForReviewButton from "./SubmitForReviewButton";
-
-// ✅ NEW: build absolute base URL safely on Vercel/Next 16
 import { headers } from "next/headers";
+import type { RebornConfig } from "@/lib/reborn_rank_rules";
 
-/* =========================
-   Types & Fetchers
-========================= */
-
-type PlayerRow = {
-  id: string;
-  rsn: string;
-};
+type PlayerRow = { id: string; rsn: string };
 
 async function getBaseUrl() {
-  // Next 16: headers() can be typed as async
   const h = await headers();
-
-  // Prefer forwarded host/proto in Vercel
   const proto = h.get("x-forwarded-proto") ?? "https";
   const host = h.get("x-forwarded-host") ?? h.get("host");
-
   if (host) return `${proto}://${host}`;
-
-  // Final fallback (should rarely happen)
   return process.env.NEXTAUTH_URL ?? "";
 }
 
 async function getPlayer(id: string): Promise<PlayerRow | null> {
   const base = await getBaseUrl();
-  const res = await fetch(`${base}/api/players/${encodeURIComponent(id)}`, {
-    cache: "no-store",
-  });
+  const res = await fetch(`${base}/api/players/${encodeURIComponent(id)}`, { cache: "no-store" });
   if (!res.ok) return null;
   const json = await res.json();
   return json?.player ?? json ?? null;
@@ -51,27 +31,25 @@ async function getPlayer(id: string): Promise<PlayerRow | null> {
 
 async function getWom(rsn: string) {
   const base = await getBaseUrl();
-  const res = await fetch(
-    `${base}/api/wom/player?rsn=${encodeURIComponent(rsn)}`,
-    { cache: "no-store" }
-  );
+  const res = await fetch(`${base}/api/wom/player?rsn=${encodeURIComponent(rsn)}`, { cache: "no-store" });
   if (!res.ok) return null;
   return res.json();
 }
 
 async function getTempleCollectionLog(rsn: string) {
   const base = await getBaseUrl();
-  const res = await fetch(
-    `${base}/api/temple/collection-log?rsn=${encodeURIComponent(rsn)}`,
-    { cache: "no-store" }
-  );
+  const res = await fetch(`${base}/api/temple/collection-log?rsn=${encodeURIComponent(rsn)}`, { cache: "no-store" });
   if (!res.ok) return null;
   return res.json();
 }
 
-/* =========================
-   Helpers
-========================= */
+async function getActiveConfig(): Promise<RebornConfig | null> {
+  const base = await getBaseUrl();
+  const res = await fetch(`${base}/api/config`, { cache: "no-store" });
+  if (!res.ok) return null;
+  const json = await res.json();
+  return (json?.config ?? null) as RebornConfig | null;
+}
 
 function metricToKc(m: any): number {
   const n = Number(m?.kills ?? m?.score ?? m?.kc ?? 0);
@@ -115,14 +93,9 @@ function prettyBossName(key: string) {
     tombs_of_amascut_expert: "Expert Tombs of Amascut",
     guardians_of_the_rift: "Guardians of the Rift",
   };
-
   if (overrides[key]) return overrides[key];
   return titleCase(key.replace(/_/g, " "));
 }
-
-/* =========================
-   Zamorakian rules
-========================= */
 
 const ZAM_TARGET_RAIDS = 3000;
 const ZAM_TARGET_BOSS_KC = 35000;
@@ -136,57 +109,15 @@ const RAID_KEYS = new Set<string>([
   "tombs_of_amascut_expert",
 ]);
 
-const ZAM_BOSS_EXCLUDE_KEYS = new Set<string>([
-  "wintertodt",
-  "zalcano",
-  "hespori",
-  "guardians_of_the_rift",
-  "gotr",
-]);
-
-const ZAM_ACTIVITY_EXCLUDE_KEYS = new Set<string>([
-  "guardians_of_the_rift",
-  "guardians_of_the_rift_games",
-  "gotr",
-]);
-
-/* =========================
-   Styles
-========================= */
+const ZAM_BOSS_EXCLUDE_KEYS = new Set<string>(["wintertodt", "zalcano", "hespori", "guardians_of_the_rift", "gotr"]);
+const ZAM_ACTIVITY_EXCLUDE_KEYS = new Set<string>(["guardians_of_the_rift", "guardians_of_the_rift_games", "gotr"]);
 
 const S = {
-  page: {
-    padding: 24,
-    fontFamily: "system-ui",
-  } as React.CSSProperties,
-
-  topbar: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 12,
-  } as React.CSSProperties,
-
-  h1: {
-    fontSize: 34,
-    margin: "8px 0 14px 0",
-    lineHeight: 1.05,
-  } as React.CSSProperties,
-
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "1.05fr 1.45fr 0.95fr",
-    gap: 14,
-    alignItems: "start",
-  } as React.CSSProperties,
-
-  col: {
-    alignSelf: "start",
-    display: "grid",
-    gap: 12,
-    minWidth: 0,
-  } as React.CSSProperties,
-
+  page: { padding: 24, fontFamily: "system-ui" } as React.CSSProperties,
+  topbar: { display: "flex", alignItems: "center", gap: 12, marginBottom: 12 } as React.CSSProperties,
+  h1: { fontSize: 34, margin: "8px 0 14px 0", lineHeight: 1.05 } as React.CSSProperties,
+  grid: { display: "grid", gridTemplateColumns: "1.05fr 1.45fr 0.95fr", gap: 14, alignItems: "start" } as React.CSSProperties,
+  col: { alignSelf: "start", display: "grid", gap: 12, minWidth: 0 } as React.CSSProperties,
   panelWrap: {
     alignSelf: "start",
     minWidth: 0,
@@ -199,15 +130,7 @@ const S = {
   } as React.CSSProperties,
 } as const;
 
-/* =========================
-   Page
-========================= */
-
-export default async function CalculatorPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function CalculatorPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const player = await getPlayer(id);
 
@@ -223,13 +146,13 @@ export default async function CalculatorPage({
 
   const rsn = player.rsn.trim();
   const wom = rsn ? await getWom(rsn) : null;
-
   const templeResp = rsn ? await getTempleCollectionLog(rsn) : null;
 
-  // ✅ preserve old behavior, but be resilient
+  // ✅ NEW: DB config
+  const config = await getActiveConfig();
+
   const temple = templeResp?.temple ?? templeResp?.data ?? null;
 
-  // Skills
   const overall = pickMetric(wom, "skills", "overall");
   const totalLevel = overall?.level ?? null;
   const overallXp = overall?.experience ?? null;
@@ -261,7 +184,6 @@ export default async function CalculatorPage({
     sailing: pickMetric(wom, "skills", "sailing"),
   };
 
-  // PvM totals
   const bosses = wom?.latestSnapshot?.data?.bosses ?? {};
   const activities = wom?.latestSnapshot?.data?.activities ?? {};
 
@@ -276,16 +198,14 @@ export default async function CalculatorPage({
 
     if (RAID_KEYS.has(key)) {
       raidsTotal += kc;
-      if (kc > highestRaid.kc)
-        highestRaid = { key, name: prettyBossName(key), kc };
+      if (kc > highestRaid.kc) highestRaid = { key, name: prettyBossName(key), kc };
       continue;
     }
 
     if (ZAM_BOSS_EXCLUDE_KEYS.has(key)) continue;
 
     bossKillsTotal += kc;
-    if (kc > highestBoss.kc)
-      highestBoss = { key, name: prettyBossName(key), kc };
+    if (kc > highestBoss.kc) highestBoss = { key, name: prettyBossName(key), kc };
   }
 
   const gotrActivityKc = (() => {
@@ -297,17 +217,11 @@ export default async function CalculatorPage({
     return 0;
   })();
 
-  // ✅ FIX: EHC + Collection log robust extraction
-  // Your /api/temple/collection-log returns: { ok, temple: <payload>, pets, petsRow }
-  // The fields we want are under templeResp.temple.data in Temple's payload.
   const t = templeResp?.temple ?? null;
   const tData = t?.data ?? null;
   const tTotals = tData?.totals ?? null;
 
-  const templeEhc =
-    tData?.ehc ??
-    temple?.ehc ?? // fallback if your own code ever flattens it
-    null;
+  const templeEhc = tData?.ehc ?? temple?.ehc ?? null;
 
   const collected =
     tTotals?.total_collections_in_response ??
@@ -318,30 +232,22 @@ export default async function CalculatorPage({
     tData?.total_collections ??
     null;
 
-  const available =
-    tTotals?.total_collections_available ??
-    tData?.total_collections_available ??
-    null;
+  const available = tTotals?.total_collections_available ?? tData?.total_collections_available ?? null;
 
-  const collectionLog =
-    collected != null && available != null ? `${collected}/${available}` : "—";
+  const collectionLog = collected != null && available != null ? `${collected}/${available}` : "—";
 
   const raidsProgress = clamp01(raidsTotal / ZAM_TARGET_RAIDS);
   const bossProgress = clamp01(bossKillsTotal / ZAM_TARGET_BOSS_KC);
 
   const excludedLabel = `Excluding: Raids, Wintertodt, Zalcano, GOTR, Hespori`;
 
-  // ✅ modal route for this calculator id
-  const rankStructureHref = `/calculator/${encodeURIComponent(
-    player.id
-  )}/rank-structure`;
+  const rankStructureHref = `/calculator/${encodeURIComponent(player.id)}/rank-structure`;
 
   return (
     <main style={S.page}>
       <div style={S.topbar}>
         <BackButton fallbackHref="/players" />
 
-        {/* ✅ Reborn Irons Rank Calculator pill (LEFT side) */}
         <div
           style={{
             display: "flex",
@@ -353,54 +259,24 @@ export default async function CalculatorPage({
             border: "1px solid rgba(255,255,255,0.12)",
           }}
         >
-          <IconImg
-            src="/clan/icon.png"
-            alt="Reborn Irons"
-            size={32}
-            style={{ borderRadius: 10 }}
-          />
+          <IconImg src="/clan/icon.png" alt="Reborn Irons" size={32} style={{ borderRadius: 10 }} />
           <div style={{ lineHeight: 1.05 }}>
-            <div style={{ fontWeight: 900, letterSpacing: 0.4 }}>
-              REBORN IRONS
-            </div>
-            <div
-              style={{
-                fontSize: 12,
-                opacity: 0.8,
-                fontWeight: 800,
-              }}
-            >
-              Rank Calculator
-            </div>
+            <div style={{ fontWeight: 900, letterSpacing: 0.4 }}>REBORN IRONS</div>
+            <div style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>Rank Calculator</div>
           </div>
         </div>
 
-        {/* ✅ right side actions */}
         <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
-          <SubmitForReviewButton
-            playerId={player.id}
-            rsn={rsn}
-            requestedRank={"Manual review"}
-            requestedRole={"Manual review"}
-          />
-
+          <SubmitForReviewButton playerId={player.id} rsn={rsn} requestedRank={"Manual review"} requestedRole={"Manual review"} />
           <RefreshWomButton rsn={rsn} />
         </div>
       </div>
 
-      <SyncWarnings
-        rsn={rsn}
-        templeOk={!!temple}
-        templeStale={false}
-        wikiOk={false}
-        wikiStale={true}
-        staleDays={7}
-      />
+      <SyncWarnings rsn={rsn} templeOk={!!temple} templeStale={false} wikiOk={false} wikiStale={true} staleDays={7} />
 
       <h1 style={S.h1}>{rsn || "—"}</h1>
 
       <div style={S.grid}>
-        {/* LEFT COLUMN */}
         <div style={S.col}>
           <Card title="Summary">
             {!rsn ? (
@@ -411,9 +287,7 @@ export default async function CalculatorPage({
               <div style={{ display: "grid", gap: 6 }}>
                 <Row label="Total level" value={fmtInt(totalLevel)} />
                 <Row label="Overall XP" value={fmtInt(overallXp)} />
-                <SkillingRankPanel
-                  totalLevel={typeof totalLevel === "number" ? totalLevel : null}
-                />
+                <SkillingRankPanel totalLevel={typeof totalLevel === "number" ? totalLevel : null} />
                 <Divider tight />
 
                 <Row label="EHP" value={fmt1(wom?.ehp)} />
@@ -432,65 +306,34 @@ export default async function CalculatorPage({
             ) : (
               <div style={{ display: "grid", gap: 8 }}>
                 <div style={{ display: "grid", gap: 6 }}>
-                  <div style={{ fontWeight: 900, fontSize: 12, opacity: 0.9 }}>
-                    Zamorakian Progress
-                  </div>
+                  <div style={{ fontWeight: 900, fontSize: 12, opacity: 0.9 }}>Zamorakian Progress</div>
 
-                  <Row
-                    label="Raids KC"
-                    value={`${raidsTotal.toLocaleString()} / ${ZAM_TARGET_RAIDS.toLocaleString()}`}
-                  />
+                  <Row label="Raids KC" value={`${raidsTotal.toLocaleString()} / ${ZAM_TARGET_RAIDS.toLocaleString()}`} />
                   <ProgressBar value={raidsProgress} />
 
-                  <Row
-                    label="Bossing KC"
-                    value={`${bossKillsTotal.toLocaleString()} / ${ZAM_TARGET_BOSS_KC.toLocaleString()}`}
-                  />
+                  <Row label="Bossing KC" value={`${bossKillsTotal.toLocaleString()} / ${ZAM_TARGET_BOSS_KC.toLocaleString()}`} />
                   <ProgressBar value={bossProgress} />
 
                   <div style={{ fontSize: 11, opacity: 0.72, lineHeight: 1.2 }}>
                     {excludedLabel}
-                    {gotrActivityKc > 0 ? (
-                      <span style={{ opacity: 0.85 }}>
-                        {" "}
-                        (GOTR activity seen: {gotrActivityKc.toLocaleString()})
-                      </span>
-                    ) : null}
+                    {gotrActivityKc > 0 ? <span style={{ opacity: 0.85 }}> (GOTR activity seen: {gotrActivityKc.toLocaleString()})</span> : null}
                   </div>
 
                   <Divider tight />
                 </div>
 
                 <Row label="Total raids" value={raidsTotal.toLocaleString()} />
-                <Row
-                  label="Highest raid"
-                  value={
-                    highestRaid.kc > 0
-                      ? `${highestRaid.name} (${highestRaid.kc.toLocaleString()})`
-                      : "—"
-                  }
-                />
+                <Row label="Highest raid" value={highestRaid.kc > 0 ? `${highestRaid.name} (${highestRaid.kc.toLocaleString()})` : "—"} />
 
                 <Divider tight />
 
-                <Row
-                  label="Total boss kills"
-                  value={bossKillsTotal.toLocaleString()}
-                />
-                <Row
-                  label="Highest boss"
-                  value={
-                    highestBoss.kc > 0
-                      ? `${highestBoss.name} (${highestBoss.kc.toLocaleString()})`
-                      : "—"
-                  }
-                />
+                <Row label="Total boss kills" value={bossKillsTotal.toLocaleString()} />
+                <Row label="Highest boss" value={highestBoss.kc > 0 ? `${highestBoss.name} (${highestBoss.kc.toLocaleString()})` : "—"} />
               </div>
             )}
           </Card>
         </div>
 
-        {/* MIDDLE COLUMN */}
         <div style={S.panelWrap}>
           <ItemChecklist
             playerId={player.id}
@@ -498,10 +341,10 @@ export default async function CalculatorPage({
             templeResp={templeResp}
             templeUpdatedMs={null}
             rankStructureHref={rankStructureHref}
+            config={config} // ✅ NEW
           />
         </div>
 
-        {/* RIGHT COLUMN */}
         <div style={S.panelWrap}>
           <SkillsTab skills={skillsTab} totalLevel={totalLevel} />
         </div>
@@ -509,17 +352,11 @@ export default async function CalculatorPage({
 
       <details style={{ marginTop: 14, opacity: 0.9 }}>
         <summary style={{ cursor: "pointer" }}>Debug: WOM + Temple JSON</summary>
-        <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>
-          {JSON.stringify({ wom, templeResp }, null, 2)}
-        </pre>
+        <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{JSON.stringify({ wom, templeResp, config }, null, 2)}</pre>
       </details>
     </main>
   );
 }
-
-/* =========================
-   Compact UI Bits
-========================= */
 
 function Card({ title, children }: { title: React.ReactNode; children: any }) {
   return (
@@ -531,9 +368,7 @@ function Card({ title, children }: { title: React.ReactNode; children: any }) {
         padding: 12,
       }}
     >
-      <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 14 }}>
-        {title}
-      </div>
+      <div style={{ fontWeight: 900, marginBottom: 8, fontSize: 14 }}>{title}</div>
       {children}
     </section>
   );
@@ -541,16 +376,7 @@ function Card({ title, children }: { title: React.ReactNode; children: any }) {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "1fr auto",
-        gap: 10,
-        alignItems: "baseline",
-        lineHeight: 1.15,
-        fontSize: 13,
-      }}
-    >
+    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "baseline", lineHeight: 1.15, fontSize: 13 }}>
       <div style={{ opacity: 0.78, minWidth: 0 }}>{label}</div>
       <div style={{ fontWeight: 900, whiteSpace: "nowrap" }}>{value}</div>
     </div>
@@ -571,28 +397,13 @@ function ProgressBar({ value }: { value: number }) {
       aria-label={`Progress ${pct}%`}
       title={`${pct}%`}
     >
-      <div
-        style={{
-          height: "100%",
-          width: `${pct}%`,
-          background: "rgba(26,255,0,0.85)",
-          transition: "width 450ms ease",
-        }}
-      />
+      <div style={{ height: "100%", width: `${pct}%`, background: "rgba(26,255,0,0.85)", transition: "width 450ms ease" }} />
     </div>
   );
 }
 
 function Divider({ tight }: { tight?: boolean }) {
-  return (
-    <div
-      style={{
-        height: 1,
-        background: "rgba(255,255,255,0.10)",
-        margin: tight ? "6px 0" : "10px 0",
-      }}
-    />
-  );
+  return <div style={{ height: 1, background: "rgba(255,255,255,0.10)", margin: tight ? "6px 0" : "10px 0" }} />;
 }
 
 function Muted({ children }: { children: any }) {

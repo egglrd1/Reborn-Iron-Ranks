@@ -15,32 +15,43 @@ export const authOptions: NextAuthOptions = {
       // profile is only present on initial sign-in
       if (profile && (profile as any).id) {
         (token as any).discordId = String((profile as any).id);
+
+        // Discord can have multiple "display name" fields depending on account/settings
+        const p: any = profile;
+        const display =
+          p.global_name ||
+          p.username ||
+          p.display_name ||
+          (token as any).name ||
+          null;
+
+        if (display) (token as any).discordName = String(display);
       }
       return token;
     },
+
     async session({ session, token }) {
       (session as any).discordId = (token as any).discordId;
+
+      const discordName = (token as any).discordName;
+      if (discordName) {
+        session.user = session.user ?? ({} as any);
+        (session.user as any).name = String(discordName);
+      }
+
       return session;
     },
 
     // ✅ Prevent bad callbackUrls like /calculator/undefined
     async redirect({ url, baseUrl }) {
       try {
-        // Allow relative URLs (NextAuth often passes these)
-        const target = url.startsWith("/")
-          ? new URL(url, baseUrl)
-          : new URL(url);
+        const target = url.startsWith("/") ? new URL(url, baseUrl) : new URL(url);
 
-        // Only allow redirects back to our own site
         if (target.origin !== new URL(baseUrl).origin) return baseUrl;
 
-        // Block the exact bad case you're seeing
         const path = target.pathname || "";
-        if (path.includes("/calculator/undefined")) {
-          return `${baseUrl}/players`;
-        }
+        if (path.includes("/calculator/undefined")) return `${baseUrl}/players`;
 
-        // Also block any calculator route that ends with undefined/null/empty
         if (
           path.startsWith("/calculator/") &&
           (path.endsWith("/undefined") ||
@@ -51,7 +62,6 @@ export const authOptions: NextAuthOptions = {
           return `${baseUrl}/players`;
         }
 
-        // Otherwise, allow
         return target.toString();
       } catch {
         return baseUrl;
@@ -61,5 +71,4 @@ export const authOptions: NextAuthOptions = {
 };
 
 const handler = NextAuth(authOptions);
-
 export { handler as GET, handler as POST };

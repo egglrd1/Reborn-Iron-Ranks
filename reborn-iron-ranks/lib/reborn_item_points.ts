@@ -6,6 +6,9 @@ export type ItemDef = {
   points: number | null; // null = required item (hard gate, no points)
   group?: string;        // section/category for UI grouping
   notes?: string;        // "*", "**", "***", "†" etc
+
+  // ✅ NEW (optional): prefer this over /items/{id}.png when present
+  imageUrl?: string;
 };
 
 export type Requirement =
@@ -52,7 +55,6 @@ export const REQUIRED_REQUIREMENTS: Requirement[] = [
     ],
   },
   {
-    // "Dragon Warhammer or BGS"
     type: "anyOf",
     label: "Dragon Warhammer or BGS",
     itemIds: [slugify("Dragon Warhammer"), slugify("Bandos Godsword")],
@@ -79,7 +81,6 @@ export const ITEMS: ItemDef[] = [
   item("Rune Crossbow", null, "Required Items"),
   item("Helm of Neitiznot", null, "Required Items"),
   item("Berserker Ring (i)", null, "Required Items"),
-  // For the OR requirement, we still include both items here so they can be checked manually
   item("Dragon Warhammer", null, "Required Items"),
   item("Bandos Godsword", null, "Required Items"),
 
@@ -163,8 +164,7 @@ export const ITEMS: ItemDef[] = [
   item("Harmonised nightmare staff", 130, "The Nightmare"),
   item("Volatile nightmare staff", 111, "The Nightmare"),
   item("Inquisitor's Mace", 87, "The Nightmare"),
-  item("Inquisitor's great helm", 43, "The Nightmare")
-,
+  item("Inquisitor's great helm", 43, "The Nightmare"),
   item("Inquisitor's Hauberk", 43, "The Nightmare"),
   item("Inquisitor's Plateskirt", 43, "The Nightmare"),
   item("Nightmare Staff", 25, "The Nightmare"),

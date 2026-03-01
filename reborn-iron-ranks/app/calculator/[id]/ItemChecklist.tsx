@@ -2,15 +2,24 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ITEMS, type ItemDef } from "@/lib/reborn_item_points";
-import { computePvmRank } from "@/lib/reborn_rank_rules";
+import {
+  ITEMS as FALLBACK_ITEMS,
+  REQUIRED_REQUIREMENTS,
+  type ItemDef,
+  type Requirement,
+} from "@/lib/reborn_item_points";
+import {
+  computePvmRankFromConfig,
+  PVM_RANKS,
+  type RebornConfig,
+  type RankDef,
+} from "@/lib/reborn_rank_rules";
 
 function rankIconSrc(rankId: string) {
   return `/ranks/${rankId}.png`;
 }
 
 function isInfernalGatedRank(rankId: string) {
-  // these are the 3 infernal-gated ranks in your rules
   return rankId === "gnome_child" || rankId === "wrath" || rankId === "beast";
 }
 
@@ -23,25 +32,41 @@ type Props = {
   rsn: string;
   templeResp?: any;
   templeUpdatedMs?: number | null;
-
-  // used to open modal route (.(rank-structure))
   rankStructureHref?: string;
+  config?: RebornConfig | null;
 };
 
 type CheckedMap = Record<string, boolean>;
+type ItemRow = ItemDef & { enabled?: boolean; imageUrl?: string };
 
 function lsKey(playerId: string) {
   return `reborn_item_checklist_v1_${playerId}`;
 }
 
 function lsTempleAppliedStampKey(playerId: string) {
-  // bump version so everyone re-applies after this fix
   return `reborn_temple_applied_stamp_v4_${playerId}`;
 }
 
-function groupItems(items: ItemDef[]) {
-  const map = new Map<string, ItemDef[]>();
+// ✅ Always have a real config to hand to computePvmRankFromConfig
+const FALLBACK_CONFIG: RebornConfig = {
+  schemaVersion: 1,
+  itemPoints: {
+    items: FALLBACK_ITEMS as any,
+    requiredRequirements: REQUIRED_REQUIREMENTS as Requirement[],
+  },
+  pvmRanks: PVM_RANKS as RankDef[],
+};
+
+function normItemsFromConfig(config?: RebornConfig | null): ItemRow[] {
+  const arr = (config?.itemPoints?.items ?? []) as ItemRow[];
+  const usable = arr.filter((x) => x && x.id && x.name);
+  return usable.length ? usable : ((FALLBACK_ITEMS as any) as ItemRow[]);
+}
+
+function groupItems(items: ItemRow[]) {
+  const map = new Map<string, ItemRow[]>();
   for (const it of items) {
+    if ((it as any).enabled === false) continue;
     const g = it.group ?? "Other";
     if (!map.has(g)) map.set(g, []);
     map.get(g)!.push(it);
@@ -69,13 +94,8 @@ function normalizeName(s: string) {
     .trim();
 }
 
-/**
- * Pull item names out of Temple payload.
- * Your API route returns: { ok: true, temple: <payload> }
- */
 function extractTempleItemNames(resp: any): string[] {
   const out: string[] = [];
-
   const temple = resp?.temple ?? resp;
   const data = temple?.data ?? temple;
 
@@ -131,14 +151,12 @@ function extractTempleItemNames(resp: any): string[] {
   return [...new Set(out)];
 }
 
-function buildLookup() {
+function buildLookup(items: ItemRow[]) {
   const byId = new Map<string, string>();
   const byName = new Map<string, string>();
-
-  // For fuzzy fallback: keep normalized -> {id, rawName}
   const normEntries: Array<{ id: string; norm: string; raw: string }> = [];
 
-  for (const it of ITEMS) {
+  for (const it of items) {
     byId.set(it.id, it.id);
     byName.set(normalizeName(it.name), it.id);
     byName.set(normalizeName(it.name.replace(/\*+/g, "").trim()), it.id);
@@ -151,23 +169,7 @@ function buildLookup() {
     return byId.get(needle) ?? byName.get(n) ?? null;
   };
 
-  /**
-   * Try multiple labels; if still not found, do a SAFE fuzzy contains match:
-   * - if exactly 1 item contains all tokens, accept it.
-   */
-  const findIdAny = (needles: string[]) => {
-    for (const s of needles) {
-      const id = findId(s);
-      if (id) return id;
-    }
-
-    // fuzzy fallback
-    const best = fuzzyFindOne(needles);
-    return best;
-  };
-
   const fuzzyFindOne = (needles: string[]) => {
-    // Turn candidate strings into token sets
     const tokenSets = needles
       .map((s) => normalizeName(s))
       .filter(Boolean)
@@ -175,7 +177,6 @@ function buildLookup() {
 
     if (!tokenSets.length) return null;
 
-    // Score entries by how many tokenSets they fully contain
     const matches: string[] = [];
     for (const e of normEntries) {
       for (const tokens of tokenSets) {
@@ -187,9 +188,16 @@ function buildLookup() {
       }
     }
 
-    // Only accept if unambiguous
     const uniq = [...new Set(matches)];
     return uniq.length === 1 ? uniq[0] : null;
+  };
+
+  const findIdAny = (needles: string[]) => {
+    for (const s of needles) {
+      const id = findId(s);
+      if (id) return id;
+    }
+    return fuzzyFindOne(needles);
   };
 
   return { findId, findIdAny };
@@ -206,14 +214,9 @@ function buildTempleCounts(names: string[]) {
 
 function resolveTempleToChecklistIds(
   templeNames: string[],
-  lookup: {
-    findId: (needle: string) => string | null;
-    findIdAny: (needles: string[]) => string | null;
-  }
+  lookup: { findId: (needle: string) => string | null; findIdAny: (needles: string[]) => string | null }
 ) {
   const counts = buildTempleCounts(templeNames);
-
-  const has = (name: string) => (counts.get(normalizeName(name)) ?? 0) > 0;
 
   const countAnyOf = (names: string[]) => {
     let total = 0;
@@ -221,171 +224,54 @@ function resolveTempleToChecklistIds(
     return total;
   };
 
-  // alias (Temple exact variants -> canonical-ish labels)
-  const aliasToCanonical: Record<string, string> = {
-    [normalizeName("Tumeken's shadow (uncharged)")]: "Tumeken's shadow",
-    [normalizeName("Scythe of vitur (uncharged)")]: "Scythe of vitur",
-    [normalizeName("Sanguinesti staff (uncharged)")]: "Sanguinesti staff",
-    [normalizeName("Dizana's quiver (uncharged)")]: "Dizana's quiver",
-    [normalizeName("Tonalztics of ralos (uncharged)")]: "Tonalztics of ralos",
-    [normalizeName("Eye of ayak (uncharged)")]: "Eye of ayak",
-
-    [normalizeName("Masori mask (f)")]: "Masori mask",
-    [normalizeName("Masori body (f)")]: "Masori body",
-    [normalizeName("Masori chaps (f)")]: "Masori chaps",
-
-    [normalizeName("Craw's bow (u)")]: "Craw's bow",
-    [normalizeName("Thammaron's sceptre (u)")]: "Thammaron's sceptre",
-    [normalizeName("Viggora's chainmace (u)")]: "Viggora's chainmace",
-
-    [normalizeName("Basilisk jaw")]: "Neitiznot faceguard",
-
-    [normalizeName("Torva full helm (damaged)")]: "Torva full helm",
-    [normalizeName("Torva platebody (damaged)")]: "Torva platebody",
-    [normalizeName("Torva platelegs (damaged)")]: "Torva platelegs",
-    [normalizeName("Torva full helm (broken)")]: "Torva full helm",
-    [normalizeName("Torva platebody (broken)")]: "Torva platebody",
-    [normalizeName("Torva platelegs (broken)")]: "Torva platelegs",
-
-    [normalizeName("Serpentine visage")]: "Serpentine helm",
-
-    [normalizeName("Trident of the seas (uncharged)")]: "Trident of the seas",
-    [normalizeName("Trident of the seas (charged)")]: "Trident of the seas",
-  };
-
-  const partImplies: Array<{ part: string; targetCandidates: string[] }> = [
-    { part: "Bandos hilt", targetCandidates: ["Bandos godsword", "Bandos Godsword"] },
-    { part: "Saradomin hilt", targetCandidates: ["Saradomin godsword", "Saradomin Godsword"] },
-    { part: "Zamorak hilt", targetCandidates: ["Zamorak godsword", "Zamorak Godsword"] },
-    { part: "Armadyl hilt", targetCandidates: ["Armadyl godsword", "Armadyl Godsword"] },
-
-    { part: "Harmonised orb", targetCandidates: ["Harmonised nightmare staff", "Harmonised staff"] },
-    { part: "Eldritch orb", targetCandidates: ["Eldritch nightmare staff", "Eldritch staff"] },
-    { part: "Volatile orb", targetCandidates: ["Volatile nightmare staff", "Volatile staff"] },
-
-    { part: "Avernic defender hilt", targetCandidates: ["Avernic defender", "Avernic Defender"] },
-
-    { part: "Hydra leather", targetCandidates: ["Ferocious gloves", "Ferocious Gloves"] },
-
-    { part: "Tanzanite fang", targetCandidates: ["Toxic blowpipe", "Toxic Blowpipe"] },
-
-    { part: "Ancient icon", targetCandidates: ["Ancient sceptre", "Ancient Sceptre"] },
-
-    { part: "Serpentine visage", targetCandidates: ["Serpentine helm", "Serpentine Helm"] },
-  ];
-
-  const requiresAll: Array<{ parts: string[]; targetCandidates: string[] }> = [
-    { parts: ["Nihil horn", "Armadyl crossbow"], targetCandidates: ["Zaryte crossbow", "Zaryte Crossbow"] },
-    { parts: ["Kodai insignia", "Master wand"], targetCandidates: ["Kodai wand", "Kodai Wand"] },
-
-    // Swamp
-    { parts: ["Magic fang", "Trident of the seas"], targetCandidates: ["Trident of the swamp", "Trident of the Swamp"] },
-
-    // Confliction
-    {
-      parts: ["Mokhaiotl cloth", "Tormented bracelet"],
-      targetCandidates: ["Confliction gauntlets", "Confliction Gauntlets"],
-    },
-
-    // DHL
-    { parts: ["Zamorakian hasta", "Hydra's claw"], targetCandidates: ["Dragon hunter lance", "Dragon Hunter Lance"] },
-
-    // Bludgeon
-    { parts: ["Bludgeon spine", "Bludgeon claw", "Bludgeon axon"], targetCandidates: ["Abyssal bludgeon", "Abyssal Bludgeon"] },
-
-    // Voidwaker
-    { parts: ["Voidwaker hilt", "Voidwaker blade", "Voidwaker gem"], targetCandidates: ["Voidwaker"] },
-
-    { parts: ["Dragon boots", "Primordial crystal"], targetCandidates: ["Primordial boots", "Primordial Boots"] },
-    { parts: ["Ranger boots", "Pegasian crystal"], targetCandidates: ["Pegasian boots", "Pegasian Boots"] },
-    { parts: ["Infinity boots", "Eternal crystal"], targetCandidates: ["Eternal boots", "Eternal Boots"] },
-
-    { parts: ["Araxyte fang", "Amulet of torture"], targetCandidates: ["Amulet of rancour", "Amulet of Rancour"] },
-
-    { parts: ["Craw's bow (u)", "Fangs of venenatis"], targetCandidates: ["Webweaver bow", "Webweaver Bow"] },
-    { parts: ["Thammaron's sceptre (u)", "Skull of vet'ion"], targetCandidates: ["Accursed sceptre", "Accursed Sceptre"] },
-    { parts: ["Viggora's chainmace (u)", "Claws of callisto"], targetCandidates: ["Ursine chainmace", "Ursine Chainmace"] },
-
-    {
-      parts: ["Executioner's axe head", "Leviathan's lure", "Siren's staff", "Eye of the duke"],
-      targetCandidates: ["Soulreaper axe", "Soulreaper Axe"],
-    },
-
-    { parts: ["Noxious point", "Noxious blade", "Noxious pommel"], targetCandidates: ["Noxious halberd", "Noxious Halberd"] },
-
-    // DT2 rings
-    { parts: ["Magus vestige", "Chromium ingot", "Seers ring"], targetCandidates: ["Magus ring", "Magus Ring"] },
-    { parts: ["Venator vestige", "Chromium ingot", "Archers ring"], targetCandidates: ["Venator ring", "Venator Ring"] },
-    { parts: ["Ultor vestige", "Chromium ingot", "Berserker ring"], targetCandidates: ["Ultor ring", "Ultor Ring"] },
-    { parts: ["Bellator vestige", "Chromium ingot", "Warrior ring"], targetCandidates: ["Bellator ring", "Bellator Ring"] },
-  ];
-
   const idsToCheck = new Set<string>();
 
-  // A) direct/alias
   for (const raw of templeNames) {
-    const n = normalizeName(raw);
-    const canon = aliasToCanonical[n] ?? raw;
-
-    const id = lookup.findId(canon) ?? lookup.findIdAny([canon]);
+    const id = lookup.findId(raw) ?? lookup.findIdAny([raw]);
     if (id) idsToCheck.add(id);
   }
 
-  // B) part implies
-  for (const rule of partImplies) {
-    if (!has(rule.part)) continue;
-    const id = lookup.findIdAny(rule.targetCandidates);
-    if (id) idsToCheck.add(id);
-  }
-
-  // C) composites
-  for (const rule of requiresAll) {
-    let ok = true;
-    for (const p of rule.parts) {
-      if (p === "Trident of the seas") {
-        const present = has("Trident of the seas") || has("Trident of the seas (uncharged)") || has("Trident of the seas (charged)");
-        if (!present) ok = false;
-      } else {
-        if (!has(p)) ok = false;
-      }
-      if (!ok) break;
-    }
-    if (!ok) continue;
-
-    const id = lookup.findIdAny(rule.targetCandidates);
-    if (id) idsToCheck.add(id);
-  }
-
-  // D) count-based rules (zenyte, synapse, venator shards, burning claws)
+  // Composite rules you rely on
   if (countAnyOf(["Tormented synapse", "Tormented synapses"]) >= 3) {
     for (const t of ["Emberlight", "Purging staff", "Scorching bow"]) {
-      const id = lookup.findIdAny([t, t[0].toUpperCase() + t.slice(1)]);
+      const id = lookup.findIdAny([t]);
       if (id) idsToCheck.add(id);
     }
   }
 
   if (countAnyOf(["Venator shard", "Venator shards"]) >= 5) {
-    const id = lookup.findIdAny(["Venator bow", "Venator Bow"]);
+    const id = lookup.findIdAny(["Venator bow"]);
     if (id) idsToCheck.add(id);
   }
 
   if (countAnyOf(["Zenyte shard", "Zenyte shards"]) >= 4) {
     for (const t of ["Ring of suffering", "Amulet of torture", "Necklace of anguish", "Tormented bracelet"]) {
-      const id = lookup.findIdAny([t, t.replace(/of /i, "of "), t[0].toUpperCase() + t.slice(1)]);
+      const id = lookup.findIdAny([t]);
       if (id) idsToCheck.add(id);
     }
   }
 
   if (countAnyOf(["Burning claws"]) >= 2) {
-    const id = lookup.findIdAny(["Burning claws", "Burning Claws"]);
+    const id = lookup.findIdAny(["Burning claws"]);
     if (id) idsToCheck.add(id);
   }
 
-  // IMPORTANT: Do NOT treat Enhanced Crystal Weapon Seed as owned for Bowfa/Blade.
   return [...idsToCheck];
 }
 
-export default function ItemChecklist({ playerId, rsn, templeResp, templeUpdatedMs, rankStructureHref }: Props) {
+function itemIconSrc(it: ItemRow) {
+  // ✅ Prefer cached URL (Supabase storage public URL) if present
+  return it.imageUrl || `/items/${it.id}.png`;
+}
+
+export default function ItemChecklist({
+  playerId,
+  rsn,
+  templeResp,
+  templeUpdatedMs,
+  rankStructureHref,
+  config,
+}: Props) {
   const [checked, setChecked] = useState<CheckedMap>({});
   const [forceTempleRun, setForceTempleRun] = useState(0);
 
@@ -397,6 +283,11 @@ export default function ItemChecklist({ playerId, rsn, templeResp, templeUpdated
     matchedSample: string[];
     note?: string;
   } | null>(null);
+
+  const runtimeConfig = useMemo(() => config ?? FALLBACK_CONFIG, [config]);
+
+  const activeItems = useMemo(() => normItemsFromConfig(runtimeConfig), [runtimeConfig]);
+  const groups = useMemo(() => groupItems(activeItems), [activeItems]);
 
   useEffect(() => {
     try {
@@ -446,41 +337,15 @@ export default function ItemChecklist({ playerId, rsn, templeResp, templeUpdated
     }
 
     const names = extractTempleItemNames(templeResp);
-    const lookup = buildLookup();
+    const lookup = buildLookup(activeItems);
     const idsToCheck = resolveTempleToChecklistIds(names, lookup);
-
-    const importantTargets = [
-      "Trident of the swamp",
-      "Trident of the seas",
-      "Dragon hunter lance",
-      "Venator bow",
-      "Venator ring",
-      "Bellator ring",
-      "Ring of suffering",
-      "Amulet of torture",
-      "Necklace of anguish",
-      "Tormented bracelet",
-    ];
-
-    const setIds = new Set(idsToCheck);
-    const missingImportant = importantTargets.filter((t) => {
-      const id = lookup.findIdAny([t, t.replace(/\bthe\b/i, "the")]);
-      if (!id) return true;
-      return !setIds.has(id);
-    });
 
     setTempleDebug({
       stamp,
       foundNames: names.length,
       sampleNames: names.slice(0, 15),
       matchedIds: idsToCheck.length,
-      matchedSample: idsToCheck.slice(0, 15).map((id) => ITEMS.find((x) => x.id === id)?.name ?? id),
-      note:
-        names.length === 0
-          ? "Extractor found 0 item names in templeResp."
-          : missingImportant.length
-            ? `Still missing (likely naming mismatch in ITEMS): ${missingImportant.join(", ")}`
-            : undefined,
+      matchedSample: idsToCheck.slice(0, 15).map((id) => activeItems.find((x) => x.id === id)?.name ?? id),
     });
 
     if (idsToCheck.length) {
@@ -497,32 +362,28 @@ export default function ItemChecklist({ playerId, rsn, templeResp, templeUpdated
     try {
       localStorage.setItem(lsTempleAppliedStampKey(playerId), stamp);
     } catch {}
-  }, [playerId, rsn, templeResp, templeUpdatedMs, forceTempleRun]);
+  }, [playerId, rsn, templeResp, templeUpdatedMs, forceTempleRun, activeItems]);
 
-  const evaled = useMemo(() => computePvmRank(checked), [checked]);
+  // ✅ NOTE: this assumes your function signature is (config, checked)
+  const evaled = useMemo(() => computePvmRankFromConfig(runtimeConfig, checked), [runtimeConfig, checked]);
 
   const next = evaled.nextRank;
   const nextThreshold = next && typeof next.thresholdPoints === "number" ? next.thresholdPoints : null;
 
   const nextIsLocked = !!next && isInfernalGatedRank(next.id) && !evaled.infernalChecked;
-  const lockText = next ? lockReasonText(next.label) : "";
-
   const progressToNext = nextThreshold != null ? clamp01(evaled.pointsEarned / nextThreshold) : 1;
 
   const progressLabel =
     nextIsLocked
       ? `Infernal Cape required to advance • ${evaled.pointsEarned.toLocaleString()} / ${nextThreshold?.toLocaleString() ?? "—"} Points`
       : nextThreshold != null
-        ? `${evaled.pointsEarned.toLocaleString()} / ${nextThreshold.toLocaleString()} Points`
-        : `${evaled.pointsEarned.toLocaleString()} Points`;
-
-  const groups = useMemo(() => groupItems(ITEMS), []);
+      ? `${evaled.pointsEarned.toLocaleString()} / ${nextThreshold.toLocaleString()} Points`
+      : `${evaled.pointsEarned.toLocaleString()} Points`;
 
   const qualifiedLocked = isInfernalGatedRank(evaled.qualifiedRank.id) && !evaled.infernalChecked;
 
   return (
     <section style={{ marginTop: 6 }}>
-      {/* Header row */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
         <div style={{ fontWeight: 900, fontSize: 18, letterSpacing: 0.4 }}>Item Checklist</div>
 
@@ -546,10 +407,9 @@ export default function ItemChecklist({ playerId, rsn, templeResp, templeUpdated
               whiteSpace: "nowrap",
             }}
           >
-          Run Temple precheck
+            Run Temple precheck
           </button>
 
-          {/* View rank structure belongs here (purple pill) */}
           {rankStructureHref ? (
             <Link
               href={rankStructureHref}
@@ -602,15 +462,7 @@ export default function ItemChecklist({ playerId, rsn, templeResp, templeUpdated
                 }}
               />
               {qualifiedLocked ? (
-                <div
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    display: "grid",
-                    placeItems: "center",
-                    pointerEvents: "none",
-                  }}
-                >
+                <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}>
                   <span
                     style={{
                       width: 20,
@@ -657,7 +509,7 @@ export default function ItemChecklist({ playerId, rsn, templeResp, templeUpdated
           <div style={{ opacity: 0.9 }}>
             {next ? (
               <div
-                title={nextIsLocked ? lockText : undefined}
+                title={nextIsLocked ? lockReasonText(next.label) : undefined}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -682,17 +534,8 @@ export default function ItemChecklist({ playerId, rsn, templeResp, templeUpdated
                       img.src = "/ranks/placeholder.png";
                     }}
                   />
-
                   {nextIsLocked ? (
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        display: "grid",
-                        placeItems: "center",
-                        pointerEvents: "none",
-                      }}
-                    >
+                    <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}>
                       <span
                         style={{
                           width: 18,
@@ -715,7 +558,6 @@ export default function ItemChecklist({ playerId, rsn, templeResp, templeUpdated
                 </div>
 
                 <b style={{ fontFamily: "serif" }}>{next.label}</b>
-
                 {nextIsLocked ? <span style={{ marginLeft: 6, opacity: 0.95 }}>(Infernal Cape required)</span> : null}
               </div>
             ) : (
@@ -758,24 +600,6 @@ export default function ItemChecklist({ playerId, rsn, templeResp, templeUpdated
             <div>
               matched checklist items: <b>{templeDebug?.matchedIds ?? 0}</b>
             </div>
-
-            {templeDebug?.sampleNames?.length ? (
-              <div style={{ marginTop: 8 }}>
-                <div style={{ fontWeight: 800 }}>sample extracted names:</div>
-                <div>{templeDebug.sampleNames.join(", ")}</div>
-              </div>
-            ) : null}
-            {templeDebug?.matchedSample?.length ? (
-              <div style={{ marginTop: 8 }}>
-                <div style={{ fontWeight: 800 }}>sample matched checklist items:</div>
-                <div>{templeDebug.matchedSample.join(", ")}</div>
-              </div>
-            ) : null}
-            {templeDebug?.note ? (
-              <div style={{ marginTop: 8, opacity: 0.85 }}>
-                note: <b>{templeDebug.note}</b>
-              </div>
-            ) : null}
           </div>
         </details>
 
@@ -831,26 +655,18 @@ export default function ItemChecklist({ playerId, rsn, templeResp, templeUpdated
                         const v = e.target.checked;
                         setChecked((prev) => ({ ...prev, [it.id]: v }));
                       }}
-                      style={{
-                        width: 20,
-                        height: 20,
-                        accentColor: "#1aff00",
-                        justifySelf: "center",
-                      }}
+                      style={{ width: 20, height: 20, accentColor: "#1aff00", justifySelf: "center" }}
                     />
 
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <img
-                        src={`/items/${it.id}.png`}
+                        src={itemIconSrc(it)}
                         alt=""
                         width={28}
                         height={28}
                         loading="lazy"
                         title={it.name}
-                        style={{
-                          imageRendering: "pixelated",
-                          borderRadius: 6,
-                        }}
+                        style={{ imageRendering: "pixelated", borderRadius: 6 }}
                         onError={(e) => {
                           const img = e.currentTarget as HTMLImageElement;
                           img.onerror = null;

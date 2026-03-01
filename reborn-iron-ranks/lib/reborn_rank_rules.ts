@@ -1,6 +1,10 @@
 // lib/reborn_rank_rules.ts
-
-import { ITEM_BY_ID, REQUIRED_REQUIREMENTS, type Requirement } from "./reborn_item_points";
+import {
+  ITEM_BY_ID,
+  REQUIRED_REQUIREMENTS,
+  type Requirement,
+  type ItemDef,
+} from "./reborn_item_points";
 
 export type RankId =
   | "bob"
@@ -16,11 +20,22 @@ export type RankId =
 export type RankDef = {
   id: RankId;
   label: string;
-  thresholdPoints?: number;   // point rank only
-  requiresBase: boolean;      // all pvm ranks require base
+  thresholdPoints?: number; // point rank only
+  requiresBase: boolean; // all pvm ranks require base
   requiresInfernal?: boolean; // hard gate
 };
 
+// ✅ exported for config-driven UI
+export type RebornConfig = {
+  schemaVersion: number;
+  itemPoints: {
+    items: ItemDef[];
+    requiredRequirements: Requirement[];
+  };
+  pvmRanks: RankDef[];
+};
+
+// ✅ MUST be exported (seed + loader + UI)
 export const PVM_RANKS: RankDef[] = [
   { id: "bob", label: "Bob", requiresBase: true },
   { id: "hellcat", label: "Hellcat", requiresBase: true, thresholdPoints: 250 },
@@ -28,9 +43,27 @@ export const PVM_RANKS: RankDef[] = [
   { id: "goblin", label: "Goblin", requiresBase: true, thresholdPoints: 1000 },
   { id: "skulled", label: "Skulled", requiresBase: true, thresholdPoints: 1500 },
   { id: "soul", label: "Soul", requiresBase: true, thresholdPoints: 2000 },
-  { id: "gnome_child", label: "Gnome Child", requiresBase: true, thresholdPoints: 2400, requiresInfernal: true },
-  { id: "wrath", label: "Wrath", requiresBase: true, thresholdPoints: 2800, requiresInfernal: true },
-  { id: "beast", label: "Beast", requiresBase: true, thresholdPoints: 3200, requiresInfernal: true },
+  {
+    id: "gnome_child",
+    label: "Gnome Child",
+    requiresBase: true,
+    thresholdPoints: 2400,
+    requiresInfernal: true,
+  },
+  {
+    id: "wrath",
+    label: "Wrath",
+    requiresBase: true,
+    thresholdPoints: 2800,
+    requiresInfernal: true,
+  },
+  {
+    id: "beast",
+    label: "Beast",
+    requiresBase: true,
+    thresholdPoints: 3200,
+    requiresInfernal: true,
+  },
 ];
 
 export type ChecklistState = Record<string, boolean>; // itemId -> checked
@@ -42,8 +75,8 @@ export type RankEval = {
   pointsTargetMax: number; // sum of all point items in dataset
   infernalChecked: boolean;
 
-  qualifiedRank: RankDef;     // best rank achieved
-  nextRank: RankDef | null;   // next target
+  qualifiedRank: RankDef; // best rank achieved
+  nextRank: RankDef | null; // next target
 };
 
 function evalRequirement(req: Requirement, checked: ChecklistState) {
@@ -83,21 +116,23 @@ export function computePoints(checked: ChecklistState) {
 
 export function computePvmRank(checked: ChecklistState): RankEval {
   const base = computeBaseRequirement(checked);
-
   const { earned, max } = computePoints(checked);
 
-  const infernalId = Object.keys(ITEM_BY_ID).find((k) => ITEM_BY_ID[k].name.toLowerCase() === "infernal cape");
+  const infernalId = Object.keys(ITEM_BY_ID).find(
+    (k) => ITEM_BY_ID[k].name.toLowerCase() === "infernal cape"
+  );
   const infernalChecked = infernalId ? !!checked[infernalId] : false;
 
   // Determine highest achieved
-  let qualified = PVM_RANKS[0]; // Bob by default
+  let qualified = PVM_RANKS[0];
 
   for (const r of PVM_RANKS) {
     // base required for all PvM ranks (including bob)
     if (r.requiresBase && !base.ok) continue;
 
     // point threshold
-    if (typeof r.thresholdPoints === "number" && earned < r.thresholdPoints) continue;
+    if (typeof r.thresholdPoints === "number" && earned < r.thresholdPoints)
+      continue;
 
     // infernal gate
     if (r.requiresInfernal && !infernalChecked) continue;
@@ -107,7 +142,8 @@ export function computePvmRank(checked: ChecklistState): RankEval {
 
   // Find next rank after qualified
   const idx = PVM_RANKS.findIndex((r) => r.id === qualified.id);
-  const nextRank = idx >= 0 && idx < PVM_RANKS.length - 1 ? PVM_RANKS[idx + 1] : null;
+  const nextRank =
+    idx >= 0 && idx < PVM_RANKS.length - 1 ? PVM_RANKS[idx + 1] : null;
 
   return {
     baseOk: base.ok,
@@ -120,3 +156,67 @@ export function computePvmRank(checked: ChecklistState): RankEval {
   };
 }
 
+// ✅ Config-driven evaluator (used by admin-config + ItemChecklist)
+export function computePvmRankFromConfig(
+  config: RebornConfig,
+  checked: ChecklistState
+): RankEval {
+  const items = config?.itemPoints?.items ?? [];
+  const reqs = config?.itemPoints?.requiredRequirements ?? [];
+  const ranks = config?.pvmRanks?.length ? config.pvmRanks : PVM_RANKS;
+
+  // Build ITEM_BY_ID from config items
+  const byId: Record<string, ItemDef> = Object.fromEntries(
+    items.map((it) => [it.id, it])
+  );
+
+  // base requirement from config reqs
+  const baseMissing: string[] = [];
+  for (const req of reqs) {
+    if (req.type === "allOf") {
+      for (const id of req.itemIds) if (!checked[id]) baseMissing.push(id);
+    } else {
+      const ok = req.itemIds.some((id) => !!checked[id]);
+      if (!ok) baseMissing.push(...req.itemIds);
+    }
+  }
+  const baseOk = baseMissing.length === 0;
+
+  // points from config items
+  let earned = 0;
+  let max = 0;
+  for (const it of Object.values(byId)) {
+    if (it.points == null) continue;
+    max += it.points;
+    if (checked[it.id]) earned += it.points;
+  }
+
+  const infernalId = Object.keys(byId).find(
+    (k) => (byId[k]?.name ?? "").toLowerCase() === "infernal cape"
+  );
+  const infernalChecked = infernalId ? !!checked[infernalId] : false;
+
+  let qualified = ranks[0] ?? PVM_RANKS[0];
+
+  for (const r of ranks) {
+    if (r.requiresBase && !baseOk) continue;
+    if (typeof r.thresholdPoints === "number" && earned < r.thresholdPoints)
+      continue;
+    if (r.requiresInfernal && !infernalChecked) continue;
+    qualified = r;
+  }
+
+  const idx = ranks.findIndex((r) => r.id === qualified.id);
+  const nextRank =
+    idx >= 0 && idx < ranks.length - 1 ? ranks[idx + 1] : null;
+
+  return {
+    baseOk,
+    baseMissing,
+    pointsEarned: earned,
+    pointsTargetMax: max,
+    infernalChecked,
+    qualifiedRank: qualified,
+    nextRank,
+  };
+}
